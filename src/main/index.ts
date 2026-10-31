@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import { cancelEncode, runEncode } from './encoder'
+import { detectHwEncoders } from './hwDetect'
 import { DEFAULT_FFMPEG_PATH, getFfmpegPath, setFfmpegPath } from './config'
 import type { EncodeRequest } from '../shared/types'
 
@@ -58,6 +59,8 @@ ipcMain.handle('dialog:openExe', async () => {
 ipcMain.handle('config:ffmpegPath', () => getFfmpegPath())
 ipcMain.handle('config:defaultFfmpegPath', () => DEFAULT_FFMPEG_PATH)
 ipcMain.handle('config:setFfmpegPath', (_e, path: string) => setFfmpegPath(path))
+
+ipcMain.handle('hw:detect', async () => detectHwEncoders(await getFfmpegPath()))
 
 ipcMain.handle('encode:run', async (e, req: EncodeRequest) =>
   runEncode(e.sender, await getFfmpegPath(), req)

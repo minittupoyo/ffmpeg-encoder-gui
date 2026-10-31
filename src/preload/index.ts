@@ -14,6 +14,7 @@ const api = {
   getDefaultFfmpegPath: (): Promise<string> => ipcRenderer.invoke('config:defaultFfmpegPath'),
   /** 検証に通れば保存して null、だめならエラー文 */
   setFfmpegPath: (path: string): Promise<string | null> => ipcRenderer.invoke('config:setFfmpegPath', path),
+  detectHw: (): Promise<string[]> => ipcRenderer.invoke('hw:detect'),
   openExe: (): Promise<string | null> => ipcRenderer.invoke('dialog:openExe'),
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   runEncode: (req: EncodeRequest): Promise<EncodeResult> => ipcRenderer.invoke('encode:run', req),

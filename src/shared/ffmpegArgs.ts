@@ -1,3 +1,4 @@
+import { hwEncoderName, hwQualityArgs } from './hwEncoders'
 import type { EncodeSettings, VideoCodec } from './types'
 
 const VIDEO_ENCODER: Record<VideoCodec, string> = {
@@ -24,8 +25,13 @@ export function buildFfmpegArgs(input: string, output: string, s: EncodeSettings
   if (s.videoCodec === null) {
     args.push('-vn')
   } else {
-    args.push('-c:v', VIDEO_ENCODER[s.videoCodec], '-crf', String(s.crf))
-    if (s.videoCodec === 'vp9') args.push('-b:v', '0')
+    const hwName = hwEncoderName(s.videoCodec, s.hwAccel)
+    if (hwName && s.hwAccel !== 'none') {
+      args.push('-c:v', hwName, ...hwQualityArgs(s.hwAccel, s.crf))
+    } else {
+      args.push('-c:v', VIDEO_ENCODER[s.videoCodec], '-crf', String(s.crf))
+      if (s.videoCodec === 'vp9') args.push('-b:v', '0')
+    }
     if (s.videoCodec === 'h265' && s.container === 'mp4') args.push('-tag:v', 'hvc1')
     if (s.height !== null) args.push('-vf', `scale=-2:${s.height}`)
     if (s.fps !== null) args.push('-r', String(s.fps))

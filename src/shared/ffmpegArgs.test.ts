@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { buildFfmpegArgs, defaultOutputPath, formatCommand } from './ffmpegArgs'
 import { PRESETS } from './presets'
+import type { HwAccel } from './types'
 
-const preset = (id: string) => ({ presetId: id, ...PRESETS.find((p) => p.id === id)!.settings })
+const preset = (id: string, hwAccel: HwAccel = 'none') => ({
+  presetId: id,
+  hwAccel,
+  ...PRESETS.find((p) => p.id === id)!.settings
+})
 
 describe('buildFfmpegArgs', () => {
   it('H.264 の基本引数', () => {
@@ -29,6 +34,31 @@ describe('buildFfmpegArgs', () => {
     expect(a).toContain('-vn')
     expect(a).not.toContain('-crf')
     expect(a).toContain('libmp3lame')
+  })
+})
+
+describe('ハードウェアエンコード', () => {
+  it('NVENC は hevc_nvenc と -cq を使う', () => {
+    const a = buildFfmpegArgs('a', 'b.mp4', preset('h265', 'nvenc'))
+    expect(a).toContain('hevc_nvenc')
+    expect(a[a.indexOf('-cq') + 1]).toBe('28')
+    expect(a).not.toContain('-crf')
+    expect(a).toContain('hvc1')
+  })
+  it('QSV は -global_quality', () => {
+    const a = buildFfmpegArgs('a', 'b.mp4', preset('h264', 'qsv'))
+    expect(a).toContain('h264_qsv')
+    expect(a[a.indexOf('-global_quality') + 1]).toBe('23')
+  })
+  it('AMF は cqp', () => {
+    const a = buildFfmpegArgs('a', 'b.mkv', preset('av1', 'amf'))
+    expect(a).toContain('av1_amf')
+    expect(a[a.indexOf('-qp_i') + 1]).toBe('32')
+  })
+  it('VP9 は HW 指定でもソフトウェアにフォールバック', () => {
+    const a = buildFfmpegArgs('a', 'b.webm', preset('vp9', 'nvenc'))
+    expect(a).toContain('libvpx-vp9')
+    expect(a).toContain('-crf')
   })
 })
 
