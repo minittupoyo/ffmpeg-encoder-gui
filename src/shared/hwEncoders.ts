@@ -24,14 +24,27 @@ export function hwEncoderName(codec: VideoCodec, hw: HwAccel): string | null {
 /** 検出結果に使うキー(例: `h264:nvenc`) */
 export const hwKey = (codec: VideoCodec, hw: HwAccel): string => `${codec}:${hw}`
 
-/** HW エンコーダごとの品質指定(CRF 相当の値を渡す) */
+/** HW エンコーダごとの品質指定(CRF 相当の値を渡す)。速度プリセットは含まない */
 export function hwQualityArgs(hw: Exclude<HwAccel, 'none'>, q: number): string[] {
   switch (hw) {
     case 'nvenc':
-      return ['-preset', 'p5', '-rc', 'vbr', '-cq', String(q), '-b:v', '0']
+      return ['-rc', 'vbr', '-cq', String(q), '-b:v', '0']
     case 'qsv':
       return ['-global_quality', String(q)]
     case 'amf':
-      return ['-quality', 'quality', '-rc', 'cqp', '-qp_i', String(q), '-qp_p', String(q)]
+      return ['-rc', 'cqp', '-qp_i', String(q), '-qp_p', String(q)]
+  }
+}
+
+/** HW エンコーダごとの目標ビットレート指定 */
+export function hwBitrateArgs(hw: Exclude<HwAccel, 'none'>, kbps: number): string[] {
+  const b = `${kbps}k`
+  switch (hw) {
+    case 'nvenc':
+      return ['-rc', 'vbr', '-b:v', b]
+    case 'qsv':
+      return ['-b:v', b]
+    case 'amf':
+      return ['-rc', 'vbr_peak', '-b:v', b]
   }
 }

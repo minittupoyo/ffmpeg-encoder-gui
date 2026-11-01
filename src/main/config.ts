@@ -1,5 +1,6 @@
 import { execFile } from 'child_process'
 import { app } from 'electron'
+import { existsSync } from 'fs'
 import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 
@@ -7,6 +8,8 @@ export const DEFAULT_FFMPEG_PATH = 'C:\\ffmpeg\\ffmpeg.exe'
 
 interface Config {
   ffmpegPath: string
+  /** 前回の画面設定(中身の検証は renderer 側で行う) */
+  ui?: unknown
 }
 
 const file = (): string => join(app.getPath('userData'), 'config.json')
@@ -17,7 +20,7 @@ async function load(): Promise<Config> {
   if (cache) return cache
   try {
     const raw = JSON.parse(await readFile(file(), 'utf8')) as Partial<Config>
-    cache = { ffmpegPath: raw.ffmpegPath || DEFAULT_FFMPEG_PATH }
+    cache = { ffmpegPath: raw.ffmpegPath || DEFAULT_FFMPEG_PATH, ui: raw.ui }
   } catch {
     cache = { ffmpegPath: DEFAULT_FFMPEG_PATH }
   }
@@ -47,4 +50,20 @@ export async function setFfmpegPath(path: string): Promise<string | null> {
   cfg.ffmpegPath = path
   await writeFile(file(), JSON.stringify(cfg, null, 2), 'utf8')
   return null
+}
+
+/** 前回の画面設定を返す。出力先フォルダが既に無ければ外す */
+export async function getUiState(): Promise<unknown> {
+  const ui = (await load()).ui
+  if (ui && typeof ui === 'object' && 'outDir' in ui) {
+    const dir = (ui as { outDir?: unknown }).outDir
+    if (typeof dir === 'string' && !existsSync(dir)) return { ...ui, outDir: null }
+  }
+  return ui ?? null
+}
+
+export async function setUiState(ui: unknown): Promise<void> {
+  const cfg = await load()
+  cfg.ui = ui
+  await writeFile(file(), JSON.stringify(cfg, null, 2), 'utf8')
 }

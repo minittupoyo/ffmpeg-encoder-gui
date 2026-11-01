@@ -1,11 +1,14 @@
 import { execFile, spawn, type ChildProcess } from 'child_process'
+import { existsSync } from 'fs'
 import { unlink } from 'fs/promises'
 import type { WebContents } from 'electron'
-import { buildFfmpegArgs, defaultOutputPath } from '../shared/ffmpegArgs'
+import { buildFfmpegArgs } from '../shared/ffmpegArgs'
+import { resolveOutputPath, samePath, uniquePath } from '../shared/output'
 import { createProgressParser, progressPercent } from '../shared/progress'
 import type { EncodeRequest, EncodeResult } from '../shared/types'
 
-const running = new Map<string, { child: ChildProcess; canceled: boolean }>()
+/** 実行中(ffprobe 中を含む)のジョブ。child は spawn 後に入る */
+const running = new Map<string, { child?: ChildProcess; canceled: boolean }>()
 
 function probeDuration(ffprobe: string, input: string): Promise<number> {
   return new Promise((resolve) => {
@@ -22,11 +25,6 @@ export async function runEncode(
   ffmpegPath: string,
   req: EncodeRequest
 ): Promise<EncodeResult> {
-  const output = defaultOutputPath(req.input, req.settings.container, req.outDir ?? undefined)
-  const args = buildFfmpegArgs(req.input, output, req.settings)
-  const ffprobe = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1')
-  const duration = await probeDuration(ffprobe, req.input)
-
   const log = (line: string): void => {
     if (!sender.isDestroyed()) sender.send('encode:log', { id: req.id, line })
   }
@@ -34,10 +32,37 @@ export async function runEncode(
     if (!sender.isDestroyed()) sender.send('encode:progress', { id: req.id, percent })
   }
 
+  // 出力パスの決定。入力そのものを上書きしないよう、同一パスのときは上書き指定でも別名にする
+  let output = resolveOutputPath(req.input, req.settings.container, req.outDir, req.outputTemplate, req.settings.presetId)
+  let policy = req.onConflict
+  if (samePath(output, req.input) && policy === 'overwrite') policy = 'rename'
+  if (existsSync(output)) {
+    if (policy === 'skip') {
+      log(`スキップ: 出力ファイルが既に存在します: ${output}`)
+      return { status: 'skipped', code: null, output }
+    }
+    if (policy === 'rename') {
+      output = uniquePath(output, existsSync)
+      log(`同名ファイルがあるため別名で出力します: ${output}`)
+    }
+  }
+
+  const entry: { child?: ChildProcess; canceled: boolean } = { canceled: false }
+  running.set(req.id, entry)
+
+  const args = buildFfmpegArgs(req.input, output, req.settings)
+  const ffprobe = ffmpegPath.replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1')
+  const duration = await probeDuration(ffprobe, req.input)
+
+  // ffprobe 中にキャンセルされた場合は ffmpeg を起動しない
+  if (entry.canceled) {
+    running.delete(req.id)
+    return { status: 'canceled', code: null, output }
+  }
+
   return new Promise<EncodeResult>((resolve) => {
     const child = spawn(ffmpegPath, args, { windowsHide: true })
-    const entry = { child, canceled: false }
-    running.set(req.id, entry)
+    entry.child = child
 
     const feed = createProgressParser((sec) => progress(progressPercent(sec, duration)))
     child.stdout.setEncoding('utf8')
@@ -48,18 +73,18 @@ export async function runEncode(
     child.on('error', (e) => {
       running.delete(req.id)
       log(`起動失敗: ${e.message}`)
-      resolve({ status: 'error', code: null })
+      resolve({ status: 'error', code: null, output })
     })
     child.on('close', async (code) => {
       running.delete(req.id)
       if (entry.canceled) {
         await unlink(output).catch(() => {})
-        resolve({ status: 'canceled', code })
+        resolve({ status: 'canceled', code, output })
       } else if (code === 0) {
         progress(100)
-        resolve({ status: 'done', code })
+        resolve({ status: 'done', code, output })
       } else {
-        resolve({ status: 'error', code })
+        resolve({ status: 'error', code, output })
       }
     })
   })
@@ -69,7 +94,9 @@ export function cancelEncode(id: string): void {
   const e = running.get(id)
   if (!e) return
   e.canceled = true
+  const child = e.child
+  if (!child) return
   // 'q' で ffmpeg に正常終了させ、止まらなければ強制終了
-  e.child.stdin?.write('q')
-  setTimeout(() => e.child.kill(), 3000)
+  child.stdin?.write('q')
+  setTimeout(() => child.kill(), 3000)
 }
