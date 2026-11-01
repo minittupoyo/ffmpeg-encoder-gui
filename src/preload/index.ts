@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { EncodeRequest, EncodeResult } from '../shared/types'
+import type { EncodeRequest, EncodeResult, ProgressEvent } from '../shared/types'
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const handler = (_e: unknown, payload: T): void => cb(payload)
@@ -26,7 +26,7 @@ const api = {
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   runEncode: (req: EncodeRequest): Promise<EncodeResult> => ipcRenderer.invoke('encode:run', req),
   cancelEncode: (id: string): void => ipcRenderer.send('encode:cancel', id),
-  onProgress: (cb: (p: { id: string; percent: number }) => void) => subscribe('encode:progress', cb),
+  onProgress: (cb: (p: ProgressEvent) => void) => subscribe('encode:progress', cb),
   onLog: (cb: (l: { id: string; line: string }) => void) => subscribe('encode:log', cb)
 }
 

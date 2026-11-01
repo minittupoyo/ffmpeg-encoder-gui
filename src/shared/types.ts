@@ -57,6 +57,28 @@ export interface BatchSettings {
   concurrency: number
 }
 
+/** ffmpeg の進捗(1 回分)。取れなかった項目は null */
+export interface ProgressStats {
+  /** ここまでに出力した映像の長さ(秒) */
+  outTimeSec: number | null
+  frame: number | null
+  fps: number | null
+  /** 再生速度の倍率(1.0 でリアルタイム) */
+  speed: number | null
+  bitrateKbps: number | null
+  /** ここまでの出力サイズ(バイト) */
+  sizeBytes: number | null
+  /** 入力の総再生時間(秒)。ffprobe で取れなければ 0 */
+  durationSec: number
+  ended: boolean
+}
+
+export interface ProgressEvent {
+  id: string
+  percent: number
+  stats: ProgressStats
+}
+
 export interface EncodeRequest {
   id: string
   input: string
@@ -71,6 +93,9 @@ export interface EncodeResult {
   code: number | null
   /** 実際に使った出力パス(同名回避で変わることがある) */
   output?: string
+  /** 完了時の入力・出力ファイルサイズ(バイト) */
+  inputSize?: number
+  outputSize?: number
 }
 
 export interface Preset {

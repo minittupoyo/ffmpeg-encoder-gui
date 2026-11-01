@@ -11,7 +11,8 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { applyProgress, overallPercent, summarize, unfinishedFiles, type Job } from '@/lib/jobs'
+import { formatBytes, formatDuration, overallRemainingSec } from '@/lib/format'
+import { applyProgress, overallPercent, summarize, sumSizes, unfinishedFiles, type Job } from '@/lib/jobs'
 import { DEFAULT_BATCH, restoreUiState } from '@/lib/persist'
 import { applyPreset, reconcileHw } from '@/lib/settings'
 
@@ -31,6 +32,9 @@ export default function App(): React.JSX.Element {
   const [jobs, setJobs] = useState<Record<string, Job>>({})
   const [log, setLog] = useState<string[]>([])
   const [running, setRunning] = useState(false)
+  /** バッチの開始時刻(ms)と、終了後の所要時間(ms) */
+  const [batchStartedAt, setBatchStartedAt] = useState<number | null>(null)
+  const [batchElapsedMs, setBatchElapsedMs] = useState<number | null>(null)
   const cancelRef = useRef(false)
   /** 実行中のファイル(同時実行があるので複数) */
   const activeRef = useRef(new Set<string>())
@@ -76,7 +80,7 @@ export default function App(): React.JSX.Element {
   }
 
   useEffect(() => {
-    const offP = window.api.onProgress(({ id, percent }) => setJobs((j) => applyProgress(j, id, percent)))
+    const offP = window.api.onProgress(({ id, percent, stats }) => setJobs((j) => applyProgress(j, id, percent, stats)))
     const offL = window.api.onLog(({ id, line }) =>
       setLog((l) => [...l.slice(-499), prefixLogRef.current ? `[${splitPath(id).name}] ${line}` : line])
     )
@@ -148,6 +152,9 @@ export default function App(): React.JSX.Element {
     cancelRef.current = false
     setRunning(true)
     setLog([])
+    const batchStart = Date.now()
+    setBatchStartedAt(batchStart)
+    setBatchElapsedMs(null)
     prefixLogRef.current = batch.concurrency > 1
     setJobs((j) => {
       const next = { ...j }
@@ -162,7 +169,8 @@ export default function App(): React.JSX.Element {
         const input = queue.shift()
         if (!input) return
         activeRef.current.add(input)
-        setJobs((j) => ({ ...j, [input]: { status: 'running', percent: 0 } }))
+        const startedAt = Date.now()
+        setJobs((j) => ({ ...j, [input]: { status: 'running', percent: 0, startedAt } }))
         const r = await window.api.runEncode({
           id: input,
           input,
@@ -177,13 +185,19 @@ export default function App(): React.JSX.Element {
           [input]: {
             status: r.status,
             percent: r.status === 'done' ? 100 : (j[input]?.percent ?? 0),
-            output: r.status === 'done' || r.status === 'skipped' ? r.output : undefined
+            output: r.status === 'done' || r.status === 'skipped' ? r.output : undefined,
+            startedAt,
+            elapsedMs: Date.now() - startedAt,
+            inputSize: r.inputSize,
+            outputSize: r.outputSize
           }
         }))
         if (r.status === 'error' && batch.stopOnError) stop = true
       }
     }
     await Promise.all(Array.from({ length: Math.min(batch.concurrency, targets.length) }, worker))
+    setBatchElapsedMs(Date.now() - batchStart)
+    setBatchStartedAt(null)
     setRunning(false)
   }
 
@@ -213,14 +227,23 @@ export default function App(): React.JSX.Element {
   const finished = counts.done + counts.error + counts.canceled + counts.skipped
   const hasJobs = Object.keys(jobs).length > 0
   const pending = unfinishedFiles(files, jobs).length
+  const sizes = sumSizes(files, jobs)
   const summaryText = [
     `完了 ${counts.done}`,
     counts.error > 0 && `エラー ${counts.error}`,
     counts.skipped > 0 && `スキップ ${counts.skipped}`,
-    counts.canceled > 0 && `中止 ${counts.canceled}`
+    counts.canceled > 0 && `中止 ${counts.canceled}`,
+    batchElapsedMs !== null && `所要 ${formatDuration(batchElapsedMs / 1000)}`,
+    sizes.input > 0 && `${formatBytes(sizes.input)} → ${formatBytes(sizes.output)}`
   ]
     .filter(Boolean)
     .join(' · ')
+  // 実行中: 経過と、進捗率からの残り時間の見積もり(進み始めは出さない)
+  const batchElapsed = batchStartedAt === null ? 0 : Date.now() - batchStartedAt
+  const batchRemain = overallRemainingSec(batchElapsed, total)
+  const runningText = `${finished} / ${files.length} 件 · 経過 ${formatDuration(batchElapsed / 1000)} · 残り ${
+    batchRemain === null ? '--:--' : `約 ${formatDuration(batchRemain)}`
+  }`
 
   return (
     <div className="relative flex h-full flex-col" onDragOver={onDragOver} onDragLeave={(e) => e.currentTarget === e.target && setDragging(false)} onDrop={onDrop}>
@@ -234,9 +257,9 @@ export default function App(): React.JSX.Element {
             <div className="flex items-center gap-2">
               <span
                 className={cn('text-xs whitespace-nowrap', !running && counts.error > 0 ? 'text-destructive' : 'text-muted-foreground')}
-                title={`${finished} / ${files.length} 件処理済み`}
+                title={running ? runningText : summaryText}
               >
-                {running ? `${finished} / ${files.length} 件処理済み` : summaryText}
+                {running ? runningText : summaryText}
               </span>
               {running && (
                 <>

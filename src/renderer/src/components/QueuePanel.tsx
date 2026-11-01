@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { formatBytes, formatDuration, remainingSec, sizeRatioPercent } from '@/lib/format'
 import type { Job } from '@/lib/jobs'
 import { cn } from '@/lib/utils'
 
@@ -13,6 +14,48 @@ const STATUS_LABEL: Record<Exclude<Job['status'], 'running'>, string> = {
   error: 'エラー',
   canceled: '中止',
   skipped: 'スキップ'
+}
+
+/** 進捗バーの下に出す詳細。実行中は 1 行目に経過/残り、2 行目に速度・fps・ビットレート・サイズ。終了後は所要時間とサイズ */
+function JobDetail({ job }: { job: Job }): React.JSX.Element | null {
+  const join = (parts: (string | false)[]): string => parts.filter(Boolean).join(' · ')
+  let lines: string[] = []
+  if (job.status === 'running') {
+    const s = job.stats
+    const elapsed = job.startedAt ? Date.now() - job.startedAt : 0
+    const remain = remainingSec(s, elapsed, job.percent)
+    lines = [
+      `経過 ${formatDuration(elapsed / 1000)} · 残り ${remain === null ? '--:--' : `約 ${formatDuration(remain)}`}`,
+      join([
+        s?.speed != null && `${s.speed.toFixed(2)}x`,
+        s?.fps != null && `${s.fps.toFixed(0)} fps`,
+        s?.bitrateKbps != null && `${Math.round(s.bitrateKbps)} kbps`,
+        s?.sizeBytes != null && formatBytes(s.sizeBytes)
+      ])
+    ]
+  } else if (job.status === 'done') {
+    const ratio = sizeRatioPercent(job.inputSize, job.outputSize)
+    lines = [
+      join([
+        job.elapsedMs !== undefined && `所要 ${formatDuration(job.elapsedMs / 1000)}`,
+        job.outputSize !== undefined &&
+          `${formatBytes(job.inputSize)} → ${formatBytes(job.outputSize)}${ratio === null ? '' : ` (${ratio.toFixed(0)}%)`}`
+      ])
+    ]
+  } else if (job.elapsedMs !== undefined && job.status !== 'skipped') {
+    lines = [`所要 ${formatDuration(job.elapsedMs / 1000)}`]
+  }
+  const shown = lines.filter(Boolean)
+  if (shown.length === 0) return null
+  return (
+    <div className="text-muted-foreground flex flex-col text-xs tabular-nums">
+      {shown.map((l) => (
+        <p key={l} className="truncate" title={l}>
+          {l}
+        </p>
+      ))}
+    </div>
+  )
 }
 
 /** キュー内の 1 行: ファイル名を主に(拡張子は常に表示)、フォルダは淡く小さく表示する */
@@ -130,6 +173,7 @@ export function QueuePanel({
                           </span>
                         </div>
                       )}
+                      {job && <JobDetail job={job} />}
                     </div>
                     {(job?.status === 'done' || job?.status === 'skipped') && job.output && (
                       <Button

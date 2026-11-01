@@ -1,11 +1,11 @@
 import { execFile, spawn, type ChildProcess } from 'child_process'
 import { existsSync } from 'fs'
-import { unlink } from 'fs/promises'
+import { stat, unlink } from 'fs/promises'
 import type { WebContents } from 'electron'
 import { buildFfmpegArgs } from '../shared/ffmpegArgs'
 import { resolveOutputPath, samePath, uniquePath } from '../shared/output'
 import { createProgressParser, progressPercent } from '../shared/progress'
-import type { EncodeRequest, EncodeResult } from '../shared/types'
+import type { EncodeRequest, EncodeResult, ProgressStats } from '../shared/types'
 
 /** 実行中(ffprobe 中を含む)のジョブ。child は spawn 後に入る */
 const running = new Map<string, { child?: ChildProcess; canceled: boolean }>()
@@ -28,8 +28,8 @@ export async function runEncode(
   const log = (line: string): void => {
     if (!sender.isDestroyed()) sender.send('encode:log', { id: req.id, line })
   }
-  const progress = (percent: number): void => {
-    if (!sender.isDestroyed()) sender.send('encode:progress', { id: req.id, percent })
+  const progress = (percent: number, stats: ProgressStats): void => {
+    if (!sender.isDestroyed()) sender.send('encode:progress', { id: req.id, percent, stats })
   }
 
   // 出力パスの決定。入力そのものを上書きしないよう、同一パスのときは上書き指定でも別名にする
@@ -64,7 +64,12 @@ export async function runEncode(
     const child = spawn(ffmpegPath, args, { windowsHide: true })
     entry.child = child
 
-    const feed = createProgressParser((sec) => progress(progressPercent(sec, duration)))
+    let last: ProgressStats = { outTimeSec: null, frame: null, fps: null, speed: null, bitrateKbps: null, sizeBytes: null, durationSec: duration, ended: false }
+    const feed = createProgressParser((info) => {
+      last = { ...info, durationSec: duration }
+      // 開始直後など出力時間がまだ取れないブロックは、進捗バーを動かさないため送らない
+      if (info.outTimeSec !== null) progress(progressPercent(info.outTimeSec, duration), last)
+    })
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', feed)
     child.stderr.setEncoding('utf8')
@@ -81,8 +86,11 @@ export async function runEncode(
         await unlink(output).catch(() => {})
         resolve({ status: 'canceled', code, output })
       } else if (code === 0) {
-        progress(100)
-        resolve({ status: 'done', code, output })
+        progress(100, { ...last, outTimeSec: duration > 0 ? duration : last.outTimeSec, ended: true })
+        const [inputSize, outputSize] = await Promise.all(
+          [req.input, output].map((f) => stat(f).then((s) => s.size).catch(() => undefined))
+        )
+        resolve({ status: 'done', code, output, inputSize, outputSize })
       } else {
         resolve({ status: 'error', code, output })
       }
