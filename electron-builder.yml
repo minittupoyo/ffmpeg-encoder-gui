@@ -1,0 +1,26 @@
+# Windows 向けインストーラ / ポータブル版のビルド設定(`npm run dist`)
+appId: io.github.minittupoyo.ffmpeg-encoder-gui
+productName: ffmpeg Encoder
+
+directories:
+  output: dist
+
+# electron-vite がバンドルした out/ だけを同梱する(依存ライブラリはすべてバンドル済み)
+files:
+  - out/**
+  - package.json
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ffmpeg-encoder-${version}-setup.${ext}
+
+portable:
+  artifactName: ffmpeg-encoder-${version}-portable.${ext}
