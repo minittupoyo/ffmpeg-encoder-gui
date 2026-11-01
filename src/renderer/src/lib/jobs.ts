@@ -5,6 +5,16 @@ export interface Job {
   output?: string
 }
 
+/**
+ * 進捗イベントをジョブに反映する。進捗イベントと完了通知は別経路で届くため順序が前後することがあり、
+ * 完了・失敗などが確定したジョブや未登録のジョブは上書きしない(遅れて届いた 100% で「完了」が戻るのを防ぐ)
+ */
+export function applyProgress(jobs: Record<string, Job>, id: string, percent: number): Record<string, Job> {
+  const cur = jobs[id]
+  if (!cur || cur.status !== 'running') return jobs
+  return { ...jobs, [id]: { ...cur, percent } }
+}
+
 /** 実行結果の集計(処理済みの件数をステータス別に数える) */
 export function summarize(files: string[], jobs: Record<string, Job>): Record<Exclude<Job['status'], 'running'>, number> {
   const r = { done: 0, error: 0, canceled: 0, skipped: 0 }

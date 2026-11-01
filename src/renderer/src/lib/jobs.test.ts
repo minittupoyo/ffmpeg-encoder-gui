@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { overallPercent, summarize, unfinishedFiles, type Job } from './jobs'
+import { applyProgress, overallPercent, summarize, unfinishedFiles, type Job } from './jobs'
 
 describe('overallPercent', () => {
   it('ファイルが無ければ 0', () => {
@@ -34,5 +34,27 @@ describe('summarize / unfinishedFiles', () => {
   })
   it('完了・スキップ以外を未完了とする', () => {
     expect(unfinishedFiles(files, jobs)).toEqual(['b', 'd', 'e'])
+  })
+})
+
+describe('applyProgress', () => {
+  it('実行中のジョブの進捗を更新する', () => {
+    const jobs: Record<string, Job> = { a: { status: 'running', percent: 10 } }
+    expect(applyProgress(jobs, 'a', 55).a).toEqual({ status: 'running', percent: 55 })
+  })
+  it('完了後に遅れて届いた進捗で状態を戻さない', () => {
+    const jobs: Record<string, Job> = { a: { status: 'done', percent: 100, output: 'x.mkv' } }
+    expect(applyProgress(jobs, 'a', 100)).toBe(jobs)
+    expect(applyProgress(jobs, 'a', 99).a.status).toBe('done')
+  })
+  it('失敗・中止・スキップも上書きしない', () => {
+    for (const status of ['error', 'canceled', 'skipped'] as const) {
+      const jobs: Record<string, Job> = { a: { status, percent: 30 } }
+      expect(applyProgress(jobs, 'a', 100)).toBe(jobs)
+    }
+  })
+  it('未登録(削除済み)のジョブは作らない', () => {
+    const jobs: Record<string, Job> = {}
+    expect(applyProgress(jobs, 'gone', 50)).toBe(jobs)
   })
 })

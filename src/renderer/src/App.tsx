@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { overallPercent, summarize, unfinishedFiles, type Job } from '@/lib/jobs'
+import { applyProgress, overallPercent, summarize, unfinishedFiles, type Job } from '@/lib/jobs'
 import { DEFAULT_BATCH, restoreUiState } from '@/lib/persist'
 import { applyPreset, reconcileHw } from '@/lib/settings'
 
@@ -76,9 +76,7 @@ export default function App(): React.JSX.Element {
   }
 
   useEffect(() => {
-    const offP = window.api.onProgress(({ id, percent }) =>
-      setJobs((j) => ({ ...j, [id]: { ...j[id], status: 'running', percent } }))
-    )
+    const offP = window.api.onProgress(({ id, percent }) => setJobs((j) => applyProgress(j, id, percent)))
     const offL = window.api.onLog(({ id, line }) =>
       setLog((l) => [...l.slice(-499), prefixLogRef.current ? `[${splitPath(id).name}] ${line}` : line])
     )
